@@ -9,6 +9,7 @@ from config import MONGODB_DB, MONGODB_URI
 
 # Initialize MongoDB connection with error handling
 from urllib.parse import quote_plus
+import certifi
 
 def fix_mongodb_uri(uri: str) -> str:
     """
@@ -53,7 +54,12 @@ try:
     FIXED_MONGODB_URI = fix_mongodb_uri(MONGODB_URI)
     
     # Create a new client with ServerApi v1 for MongoDB Atlas
-    client = MongoClient(FIXED_MONGODB_URI, server_api=ServerApi("1"))
+    # Use certifi for CA certificates to avoid SSL errors in Docker/Railway
+    client = MongoClient(
+        FIXED_MONGODB_URI, 
+        server_api=ServerApi("1"),
+        tlsCAFile=certifi.where()
+    )
 
     # Verify connection with ping command
     client.admin.command("ping")
@@ -65,6 +71,7 @@ except pymongo.errors.ConfigurationError as e:
     raise
 except pymongo.errors.ConnectionFailure as e:
     print(f"Failed to connect to MongoDB: {e}")
+    print("If you see an SSL handshake error, ensure your IP is whitelisted in MongoDB Atlas (allow 0.0.0.0/0 for Railway).")
     raise
 except Exception as e:
     print(f"Unexpected error with MongoDB connection: {e}")
