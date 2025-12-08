@@ -8,9 +8,52 @@ from pymongo.server_api import ServerApi
 from config import MONGODB_DB, MONGODB_URI
 
 # Initialize MongoDB connection with error handling
+from urllib.parse import quote_plus
+
+def fix_mongodb_uri(uri: str) -> str:
+    """
+    Fixes the MongoDB URI by escaping the username and password.
+    Handies standard mongodb:// and mongodb+srv:// URIs.
+    """
+    if not uri:
+        return uri
+        
+    try:
+        # Check if it's a standard format with credentials
+        if "@" in uri and "://" in uri:
+            prefix, rest = uri.split("://", 1)
+            
+            # Find the last @ which separates credentials from host
+            last_at_index = rest.rfind("@")
+            
+            if last_at_index != -1:
+                credentials = rest[:last_at_index]
+                host_part = rest[last_at_index+1:]
+                
+                # Split credentials into user and password
+                if ":" in credentials:
+                    # Use the first : as separator, as usernames typically don't contain :
+                    # but passwords might. If username has :, this simple logic fails,
+                    # but unescaped : in username is rare/invalid usually.
+                    username, password = credentials.split(":", 1)
+                    
+                    # Escape them
+                    username = quote_plus(username)
+                    password = quote_plus(password)
+                    
+                    return f"{prefix}://{username}:{password}@{host_part}"
+    except Exception:
+        # If parsing fails, return original uri and let pymongo handle it/fail
+        pass
+        
+    return uri
+
 try:
+    # Fix the URI if it contains unescaped characters
+    FIXED_MONGODB_URI = fix_mongodb_uri(MONGODB_URI)
+    
     # Create a new client with ServerApi v1 for MongoDB Atlas
-    client = MongoClient(MONGODB_URI, server_api=ServerApi("1"))
+    client = MongoClient(FIXED_MONGODB_URI, server_api=ServerApi("1"))
 
     # Verify connection with ping command
     client.admin.command("ping")
