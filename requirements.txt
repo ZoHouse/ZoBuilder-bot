@@ -1,6 +1,0 @@
-python-telegram-bot==13.7
-requests
-pymongo[srv]
-python-dotenv
-fastapi>=0.68.0
-uvicorn>=0.15.0

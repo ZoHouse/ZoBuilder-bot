@@ -1,0 +1,14 @@
+[project]
+name = "zobuilder-bot"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.68.0",
+    "python-dotenv>=1.2.1",
+    "python-telegram-bot==13.7",
+    "requests>=2.32.5",
+    "supabase>=2.25.1",
+    "uvicorn>=0.15.0",
+]

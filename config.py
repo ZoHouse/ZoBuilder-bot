@@ -8,6 +8,6 @@ load_dotenv()
 # Telegram Bot Configuration
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-# MongoDB configuration
-MONGODB_URI = os.getenv("MONGODB_URI")
-MONGODB_DB = os.getenv("MONGODB_DB")
+# Supabase Configuration
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
