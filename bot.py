@@ -580,6 +580,10 @@ def verify_otp(update: Update, context: CallbackContext) -> int:
             f"Invalid OTP: {result.get('message')}. Please enter the OTP again (or type /cancel to restart):"
         )
         return OTP_VERIFICATION
+
+
+
+def save_github_username(update: Update, context: CallbackContext) -> int:
     """Save GitHub username and proceed to next step."""
     user_id = update.effective_user.id
     github_username = update.message.text.strip()  # Strip whitespace
