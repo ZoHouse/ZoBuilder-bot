@@ -567,6 +567,10 @@ def verify_otp(update: Update, context: CallbackContext) -> int:
         if user_data and user_data.get("github_username"):
              # Skip to wallet if GitHub set
              if user_data.get("wallet_address"):
+                 update.message.reply_text(
+                     "✅ Phone verified! Your profile is now complete! 🎉\n"
+                     "You can use /profile to view your details."
+                 )
                  return ConversationHandler.END
              else:
                  update.message.reply_text(
