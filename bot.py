@@ -13,6 +13,8 @@ from telegram.ext import (  # type: ignore
 )
 
 import database
+import asyncio
+from auth_service import ZoAuthService
 from builder_score import compute_builder_scores
 from config import (
     TELEGRAM_TOKEN,
@@ -27,7 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Conversation states
-GITHUB_USERNAME, WALLET_ADDRESS, RETURNING_TO_GROUP = range(3)
+PHONE_NUMBER, OTP_VERIFICATION, GITHUB_USERNAME, WALLET_ADDRESS, RETURNING_TO_GROUP = range(5)
 
 # Track which users are in profile setup and their originating group
 user_setup_state = {}  # Format: {user_id: {'group_id': group_id, 'step': current_step}}
@@ -56,10 +58,11 @@ def start_private_setup_flow(update: Update, context: CallbackContext) -> int:
     user_setup_state[user_id] = {"step": "start"}
 
     # Check if user already has a profile
+    has_phone = bool(user_data.get("phone_number") if user_data else None)
     has_github = bool(user_data.get("github_username") if user_data else None)
     has_wallet = bool(user_data.get("wallet_address") if user_data else None)
 
-    if has_github and has_wallet:
+    if has_phone and has_github and has_wallet:
         # User already has full profile
         welcome_back_msg = (
             f"Welcome back, {escape_markdown_v2(user.first_name)}\\!\n\n"
@@ -75,10 +78,14 @@ def start_private_setup_flow(update: Update, context: CallbackContext) -> int:
         f"This will only take a minute\\.\n\n"
     )
 
-    if not has_github:
+    if not has_phone:
+        welcome_msg += "First, please enter your phone number with country code (e.g., +91 9876543210):"
+        user_setup_state[user_id]["step"] = "phone"
+        update.message.reply_text(welcome_msg) # No markdown for simple text prompt
+        return PHONE_NUMBER
+    elif not has_github:
         welcome_msg += "Please enter your GitHub username to continue\\:"
         user_setup_state[user_id]["step"] = "github"
-        print("User setup state:", user_setup_state)
         update.message.reply_text(welcome_msg, parse_mode="MarkdownV2")
         return GITHUB_USERNAME
     elif not has_wallet:
@@ -102,11 +109,12 @@ def start(update: Update, context: CallbackContext) -> None:
     if not is_private_chat(update):
         # Get user data to check if profile is complete
         user_data = database.get_user(user_id)
+        has_phone = bool(user_data.get("phone_number") if user_data else None)
         has_github = bool(user_data.get("github_username") if user_data else None)
         has_wallet = bool(user_data.get("wallet_address") if user_data else None)
         
         # If profile is already complete, don't redirect to DM
-        if has_github and has_wallet:
+        if has_phone and has_github and has_wallet:
             update.message.reply_text(
                 f"Hi {user.first_name}! Your builder profile is already set up. "
                 f"You can use /profile to view it."
@@ -245,6 +253,7 @@ def profile_command(update: Update, context: CallbackContext) -> None:
         return
 
     # Format profile information
+    phone_number = user_data.get("phone_number", "Not added")
     github_username = user_data.get("github_username", "Not added")
     wallet_address = user_data.get("wallet_address", "Not added")
     builder_score = user_data.get("builder_score", 0)
@@ -265,6 +274,7 @@ def profile_command(update: Update, context: CallbackContext) -> None:
     
     # Escape dynamic content for MarkdownV2
     escaped_username = escape_markdown_v2(update.effective_user.username or "Not set")
+    escaped_phone = escape_markdown_v2(str(phone_number))
     escaped_github = escape_markdown_v2(github_username)
     escaped_wallet = escape_markdown_v2(str(wallet_display))
     escaped_nominations = escape_markdown_v2(str(nominations_received))
@@ -274,6 +284,7 @@ def profile_command(update: Update, context: CallbackContext) -> None:
         f"🏗️ *Builder Profile* 🏗️\n\n"
         f"Username: @{escaped_username}\n"
         f"Builder Score: {escaped_score} points\n"
+        f"Phone: {escaped_phone}\n"
         f"GitHub: {escaped_github}\n"
         f"Wallet: {escaped_wallet}\n"
         f"Nominations received: {escaped_nominations}\n"
@@ -281,6 +292,8 @@ def profile_command(update: Update, context: CallbackContext) -> None:
 
     # Prompt to complete profile if needed
     missing_fields = []
+    if phone_number == "Not added":
+        missing_fields.append("Phone number")
     if github_username == "Not added":
         missing_fields.append("GitHub username")
     if wallet_address == "Not added":
@@ -316,10 +329,11 @@ def button_callback(update: Update, context: CallbackContext) -> None:
         user_setup_state[user_id] = {"step": "start"}
 
         # Check if user already has a profile
+        has_phone = bool(user_data.get("phone_number") if user_data else None)
         has_github = bool(user_data.get("github_username") if user_data else None)
         has_wallet = bool(user_data.get("wallet_address") if user_data else None)
 
-        if has_github and has_wallet:
+        if has_phone and has_github and has_wallet:
             # User already has full profile
             welcome_back_msg = (
                 f"Welcome back, {escape_markdown_v2(user.first_name)}\\!\n\n"
@@ -335,7 +349,12 @@ def button_callback(update: Update, context: CallbackContext) -> None:
             f"This will only take a minute\\.\n\n"
         )
 
-        if not has_github:
+        if not has_phone:
+            welcome_msg += "First, please enter your phone number with country code (e.g., +91 9876543210):"
+            user_setup_state[user_id]["step"] = "phone"
+            query.edit_message_text(welcome_msg)
+            return PHONE_NUMBER
+        elif not has_github:
             welcome_msg += "Please enter your GitHub username to continue\\:"
             user_setup_state[user_id]["step"] = "github"
             query.edit_message_text(welcome_msg, parse_mode="MarkdownV2")
@@ -444,7 +463,123 @@ def button_callback(update: Update, context: CallbackContext) -> None:
         )
 
 
-def save_github_username(update: Update, context: CallbackContext) -> int:
+def save_phone_number(update: Update, context: CallbackContext) -> int:
+    """Validate phone number and send OTP."""
+    user_id = update.effective_user.id
+    phone_input = update.message.text.strip()
+    
+    # Basic cleanup
+    phone_input = phone_input.replace("-", "").replace(" ", "")
+    
+    # Assume 91 if starts with + or just digits
+    # For now, let's require country code or try to guess?
+    # SDK expects separate country code and phone
+    
+    if not phone_input.replace("+", "").isdigit() or len(phone_input) < 10:
+        update.message.reply_text(
+            "Invalid phone number format. Please enter a valid number with country code (e.g., +919876543210):"
+        )
+        return PHONE_NUMBER
+        
+    # Extract country code and phone
+    # Simple logic: first 2-3 chars are CC
+    try:
+        # Check for + prefix
+        if phone_input.startswith("+"):
+            number_part = phone_input[1:]
+        else:
+            number_part = phone_input
+            
+        # Default simple parsing logic - user can adjust
+        if len(number_part) > 10:
+            country_code = number_part[:-10]
+            phone = number_part[-10:]
+            if not country_code:
+                country_code = "91" # Default to India if ambiguous
+        else:
+            country_code = "91"
+            phone = number_part
+            
+        # Store for verification step
+        context.user_data['phone_auth'] = {
+            'country_code': country_code,
+            'phone': phone,
+            'full_input': phone_input
+        }
+        
+        # Send OTP via SDK
+        update.message.reply_text("Sending OTP...")
+        
+        # Run async SDK call
+        result = asyncio.run(ZoAuthService.send_otp(country_code, phone))
+        
+        if result.get("success"):
+            update.message.reply_text(
+                f"OTP sent to +{country_code} {phone}. Please enter the OTP to verify:"
+            )
+            return OTP_VERIFICATION
+        else:
+            update.message.reply_text(
+                f"Failed to send OTP: {result.get('message')}. Please try entering your phone number again:"
+            )
+            return PHONE_NUMBER
+            
+    except Exception as e:
+        logger.error(f"Error in save_phone_number: {e}")
+        update.message.reply_text(
+            "An error occurred. Please try again:"
+        )
+        return PHONE_NUMBER
+
+
+def verify_otp(update: Update, context: CallbackContext) -> int:
+    """Verify the entered OTP."""
+    user_id = update.effective_user.id
+    otp = update.message.text.strip()
+    
+    auth_data = context.user_data.get('phone_auth')
+    if not auth_data:
+        update.message.reply_text("Session expired. Please enter your phone number again:")
+        return PHONE_NUMBER
+        
+    country_code = auth_data['country_code']
+    phone = auth_data['phone']
+    
+    update.message.reply_text("Verifying OTP...")
+    
+    # Run async SDK call
+    result = asyncio.run(ZoAuthService.verify_otp(country_code, phone, otp))
+    
+    if result.get("success"):
+        # Save validated phone number to DB
+        full_phone = f"+{country_code}{phone}"
+        database.update_user_phone(user_id, full_phone)
+        
+        user_setup_state[user_id]["step"] = "phone_verified"
+        
+        # Check if GitHub is already set
+        user_data = database.get_user(user_id)
+        if user_data and user_data.get("github_username"):
+             # Skip to wallet if GitHub set
+             if user_data.get("wallet_address"):
+                 return ConversationHandler.END
+             else:
+                 update.message.reply_text(
+                    "✅ Phone verified! Your GitHub is already linked.\n"
+                    "Next, please enter your wallet address:"
+                 )
+                 return WALLET_ADDRESS
+        
+        update.message.reply_text(
+            "✅ Phone verified successfully!\n\n"
+            "Next step: Please enter your GitHub username:"
+        )
+        return GITHUB_USERNAME
+    else:
+        update.message.reply_text(
+            f"Invalid OTP: {result.get('message')}. Please enter the OTP again (or type /cancel to restart):"
+        )
+        return OTP_VERIFICATION
     """Save GitHub username and proceed to next step."""
     user_id = update.effective_user.id
     github_username = update.message.text.strip()  # Strip whitespace
@@ -1160,6 +1295,12 @@ def main() -> None:
             ),
         ],
         states={
+            PHONE_NUMBER: [
+                MessageHandler(Filters.text & ~Filters.command, save_phone_number)
+            ],
+            OTP_VERIFICATION: [
+                MessageHandler(Filters.text & ~Filters.command, verify_otp)
+            ],
             GITHUB_USERNAME: [
                 MessageHandler(Filters.text & ~Filters.command, save_github_username)
             ],

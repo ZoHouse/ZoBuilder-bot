@@ -117,6 +117,16 @@ def update_user_wallet(user_id: int, wallet_address: str) -> bool:
         return False
 
 
+def update_user_phone(user_id: int, phone_number: str) -> bool:
+    """Update user's phone number"""
+    try:
+        supabase.table("users").update({"phone_number": phone_number}).eq("id", user_id).execute()
+        return True
+    except Exception as e:
+        print(f"Error updating phone: {e}")
+        return False
+
+
 def update_telegram_activity(user_id: int, activity_type: str) -> bool:
     """
     Update user's Telegram activity. 
@@ -283,6 +293,7 @@ def _map_user_from_db(db_row: Dict[str, Any]) -> Dict[str, Any]:
         "first_name": db_row["first_name"],
         "github_username": db_row["github_username"],
         "wallet_address": db_row["wallet_address"],
+        "phone_number": db_row.get("phone_number"),
         "builder_score": db_row["builder_score"],
         "created_at": db_row["created_at"], # ISO string
         "nominations_received": db_row.get("nominations_received", 0),
