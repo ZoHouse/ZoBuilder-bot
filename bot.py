@@ -553,7 +553,12 @@ def verify_otp(update: Update, context: CallbackContext) -> int:
     if result.get("success"):
         # Save validated phone number to DB
         full_phone = f"+{country_code}{phone}"
-        database.update_user_phone(user_id, full_phone)
+        if not database.update_user_phone(user_id, full_phone):
+            update.message.reply_text(
+                "✅ Phone verified, but there was an error saving it to your profile. Please contact support or try again later."
+            )
+            # We can still proceed since we verified it for this session, 
+            # or we could return to start. Let's proceed but warn.
         
         user_setup_state[user_id]["step"] = "phone_verified"
         
