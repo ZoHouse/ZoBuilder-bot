@@ -8,42 +8,33 @@ from config import ZO_CLIENT_KEY
 logger = logging.getLogger(__name__)
 
 class ZoAuthService:
-    _instance = None
-    _sdk = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(ZoAuthService, cls).__new__(cls)
-        return cls._instance
-
     @classmethod
-    async def get_sdk(cls) -> ZoPassportSDK:
-        """Get or initialize the SDK instance."""
-        if cls._sdk is None:
-            if not ZO_CLIENT_KEY:
-                logger.error("ZO_CLIENT_KEY not set in environment")
-                raise ValueError("ZO_CLIENT_KEY is required")
-            
-            # Use MemoryStorageAdapter since we don't need persistent session storage
-            # for the bot itself (user sessions are managed via Telegram state)
-            storage = MemoryStorageAdapter()
-            
-            cls._sdk = ZoPassportSDK(
-                client_key=ZO_CLIENT_KEY,
-                storage_adapter=storage,
-                debug=True # Enable debug for development
-            )
-            # Initialize the SDK
-            await cls._sdk.initialize()
-            logger.info("ZoPassport SDK initialized successfully")
-            
-        return cls._sdk
+    async def _get_sdk_instance(cls) -> ZoPassportSDK:
+        """Create a fresh SDK instance for the current event loop."""
+        if not ZO_CLIENT_KEY:
+            logger.error("ZO_CLIENT_KEY not set in environment")
+            raise ValueError("ZO_CLIENT_KEY is required")
+        
+        # Use MemoryStorageAdapter since we don't need persistent session storage
+        # for the bot itself (user sessions are managed via Telegram state)
+        storage = MemoryStorageAdapter()
+        
+        sdk = ZoPassportSDK(
+            client_key=ZO_CLIENT_KEY,
+            storage_adapter=storage,
+            debug=True # Enable debug for development
+        )
+        # Initialize the SDK
+        await sdk.initialize()
+        logger.info("ZoPassport SDK initialized successfully")
+        return sdk
 
     @classmethod
     async def send_otp(cls, country_code: str, phone_number: str) -> Dict[str, Any]:
         """Send OTP to the specified phone number."""
+        sdk = None
         try:
-            sdk = await cls.get_sdk()
+            sdk = await cls._get_sdk_instance()
             # Ensure country code doesn't have + prefix
             country_code = country_code.replace("+", "")
             
@@ -53,12 +44,16 @@ class ZoAuthService:
         except Exception as e:
             logger.error(f"Error sending OTP: {e}")
             return {"success": False, "message": str(e)}
+        finally:
+            if sdk:
+                await sdk.close()
 
     @classmethod
     async def verify_otp(cls, country_code: str, phone_number: str, otp: str) -> Dict[str, Any]:
         """Verify OTP and return auth result."""
+        sdk = None
         try:
-            sdk = await cls.get_sdk()
+            sdk = await cls._get_sdk_instance()
             country_code = country_code.replace("+", "")
             
             logger.info(f"Verifying OTP for {country_code}{phone_number}")
@@ -67,10 +62,11 @@ class ZoAuthService:
         except Exception as e:
             logger.error(f"Error verifying OTP: {e}")
             return {"success": False, "message": str(e)}
+        finally:
+            if sdk:
+                await sdk.close()
             
     @classmethod
     async def close(cls):
-        """Close the SDK connection."""
-        if cls._sdk:
-            await cls._sdk.close()
-            cls._sdk = None
+        """Close the SDK connection (deprecated)."""
+        pass
